@@ -34,7 +34,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 2. Ambil Data Dosis Terakhir
    GET /dose
    Respon Sample : 
-   ```bash
+   ```json
    {
     "timestamp": "2025-08-13T14:22:10",
     "DR": "0.15uSv/h",
@@ -45,12 +45,13 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
     "DT": "0000000",
     "S": "0.00uSv",
     "W": "0"
-  }
-  ```
+   }
+  
 3. Streaming Data Real-time via WebSocket
-    ws://localhost:8000/ws
+    `ws://localhost:8000/ws`
    Respon Contoh : 
-    ```bash {
+    ```json
+    {
     "timestamp": "2025-08-13T14:22:10",
     "DR": "0.15uSv/h",
     "D": "1.63uSv",
@@ -61,13 +62,13 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
     "S": "0.00uSv",
     "W": "0"
     }
-    ```
+    
 ## 🖥 Menguji API di Terminal
 Cek status
-curl http://localhost:8000/health
+`curl http://localhost:8000/health`
 
 Ambil dosis terakhir
-curl http://localhost:8000/dose
+`curl http://localhost:8000/dose`
 
 📊 Dashboard WebSocket
 File fs5000-websocket-dashboard.html menyediakan UI untuk:
@@ -76,6 +77,7 @@ File fs5000-websocket-dashboard.html menyediakan UI untuk:
 - Tombol download CSV log data
 ![dashboard](screenshot/dashboard.png)
 Menjalankan Dashboard
+- untuk menjalan app gunakan user level root karena membaca perangkat usb untuk dimounting
 - Pastikan API sudah berjalan di port 8000
 - Buka file fs5000-websocket-dashboard.html di browser
 - Klik Connect → data real-time akan muncul
