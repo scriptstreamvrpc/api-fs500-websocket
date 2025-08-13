@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FS5000 WebSocket Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --bg:#0b1020; --panel:#111732; --muted:#6b7280; --accent:#3b82f6; --good:#16a34a; --bad:#ef4444; --text:#e5e7eb; }
+    *{ box-sizing:border-box }
+    body{ margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial; background:var(--bg); color:var(--text); }
+    header{ padding:20px; display:flex; gap:16px; align-items:center; justify-content:space-between; flex-wrap:wrap; border-bottom:1px solid rgba(255,255,255,.08)}
+    .title{ font-weight:700; letter-spacing:.3px; font-size:20px }
+    .controls{ display:flex; gap:12px; align-items:center; flex-wrap:wrap }
+    input,button{ height:40px; border-radius:12px; border:1px solid rgba(255,255,255,.1); background:var(--panel); color:var(--text); padding:0 12px; }
+    input{ min-width:320px }
+    button{ cursor:pointer; font-weight:600 }
+    button.primary{ background:var(--accent); border-color:transparent }
+    button.ghost{ background:transparent }
+    button:disabled{ opacity:.5; cursor:not-allowed }
+    .status{ display:flex; align-items:center; gap:8px; font-size:14px; color:var(--muted) }
+    .dot{ width:10px; height:10px; border-radius:999px; background:var(--muted); box-shadow:0 0 0 2px rgba(255,255,255,.06) inset }
+    .dot.ok{ background:var(--good) }
+    .dot.bad{ background:var(--bad) }
+
+    main{ padding:20px; display:grid; gap:20px; grid-template-columns: 1.1fr .9fr; }
+    @media (max-width: 1100px){ main{ grid-template-columns:1fr } }
+
+    .card{ background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.08); border-radius:18px; box-shadow:0 10px 30px rgba(0,0,0,.25); overflow:hidden }
+    .card h3{ margin:0; padding:14px 16px; font-size:15px; font-weight:700; letter-spacing:.3px; border-bottom:1px solid rgba(255,255,255,.06); color:#cbd5e1 }
+    .card .content{ padding:16px }
+    .grid{ display:grid; gap:12px; grid-template-columns:repeat(3,1fr); }
+    @media (max-width: 700px){ .grid{ grid-template-columns:repeat(2,1fr) } }
+    .stat{ background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:14px; padding:12px; }
+    .stat .label{ font-size:12px; color:#9ca3af }
+    .stat .value{ margin-top:6px; font-size:22px; font-weight:700 }
+
+    pre{ margin:0; white-space:pre-wrap; word-break:break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background:#0d1326; border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:12px; color:#cbd5e1; max-height:300px; overflow:auto }
+    table{ width:100%; border-collapse:collapse; font-size:14px }
+    th, td{ padding:10px; border-bottom:1px solid rgba(255,255,255,.06) }
+    th{ text-align:left; color:#9ca3af; font-weight:600; background:rgba(255,255,255,.02) }
+
+    .footer{ padding:12px 16px; color:#9ca3af; font-size:12px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,.06) }
+    .pill{ padding:4px 8px; border-radius:999px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); font-size:12px; color:#cbd5e1 }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">FS5000 Radiation Streaming Dashboard</div>
+    <div class="controls">
+      <input id="wsUrl" placeholder="ws://127.0.0.1:5000/ws" />
+      <button id="btnConnect" class="primary">Connect</button>
+      <button id="btnDisconnect" class="ghost" disabled>Disconnect</button>
+      <button id="btnDownload" class="ghost" disabled>Download CSV</button>
+      <div class="status"><span id="dot" class="dot"></span><span id="statusText">Disconnected</span></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h3>Live Overview</h3>
+      <div class="content">
+        <div class="grid">
+          <div class="stat"><div class="label">Dose Rate</div><div id="statDR" class="value">—</div></div>
+          <div class="stat"><div class="label">Avg Dose Rate</div><div id="statAVG" class="value">—</div></div>
+          <div class="stat"><div class="label">Total Dose</div><div id="statD" class="value">—</div></div>
+          <div class="stat"><div class="label">CPS</div><div id="statCPS" class="value">—</div></div>
+          <div class="stat"><div class="label">CPM</div><div id="statCPM" class="value">—</div></div>
+          <div class="stat"><div class="label">Timer (DT)</div><div id="statDT" class="value">—</div></div>
+        </div>
+        <div style="margin-top:16px">
+          <canvas id="chartDR" height="110"></canvas>
+        </div>
+      </div>
+      <div class="footer">
+        <div>Last update: <span id="lastTs">—</span></div>
+        <div class="pill">Units: DR/AVG in μSv/h, D in μSv</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Raw Message / Parsed JSON</h3>
+      <div class="content">
+        <div style="display:grid; gap:12px">
+          <div>
+            <div class="label" style="margin-bottom:6px; color:#9ca3af">Raw</div>
+            <pre id="rawBox">—</pre>
+          </div>
+          <div>
+            <div class="label" style="margin-bottom:6px; color:#9ca3af">Parsed</div>
+            <pre id="jsonBox">—</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="grid-column:1 / -1">
+      <h3>Recent Data</h3>
+      <div class="content">
+        <div style="overflow:auto; max-height:280px">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>DR (μSv/h)</th>
+                <th>AVG (μSv/h)</th>
+                <th>D (μSv)</th>
+                <th>CPS</th>
+                <th>CPM</th>
+                <th>W</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // -------- Helpers: unit parsing -> numeric base units --------
+    function parseUnitNumber(v, unit) {
+      if (v == null) return null;
+      // Extract number (supports 1.23 or 0012) and detect unit suffix
+      const m = (""+v).trim().match(/([-+]?\d*\.?\d+)/);
+      if (!m) return null;
+      const num = parseFloat(m[1]);
+      const s = (""+v).toLowerCase();
+
+      // Convert to base unit depending on requested target 'unit'
+      // Supported inputs: uSv/h, mSv/h, uSv, mSv
+      // Targets: 'uSv/h' or 'uSv'
+      if (unit === 'uSv/h') {
+        if (s.includes('msv/h')) return num * 1000;
+        return num; // μSv/h already
+      }
+      if (unit === 'uSv') {
+        if (s.includes('msv')) return num * 1000;
+        return num; // μSv already
+      }
+      return num; // fallback
+    }
+
+    function byId(id){ return document.getElementById(id); }
+    const el = {
+      wsUrl: byId('wsUrl'),
+      btnConnect: byId('btnConnect'),
+      btnDisconnect: byId('btnDisconnect'),
+      btnDownload: byId('btnDownload'),
+      dot: byId('dot'),
+      statusText: byId('statusText'),
+      statDR: byId('statDR'),
+      statAVG: byId('statAVG'),
+      statD: byId('statD'),
+      statCPS: byId('statCPS'),
+      statCPM: byId('statCPM'),
+      statDT: byId('statDT'),
+      rawBox: byId('rawBox'),
+      jsonBox: byId('jsonBox'),
+      rows: byId('rows'),
+      lastTs: byId('lastTs'),
+    };
+
+    // Default URL auto-filled using current host if empty
+    (function autofillURL(){
+      if (!el.wsUrl.value) {
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        el.wsUrl.value = `${proto}://${location.hostname}:5000/ws`;
+      }
+    })();
+
+    // -------- Chart setup --------
+    let chart, chartData = {
+      labels: [],
+      datasets: [
+        { label: 'DR (μSv/h)', data: [], borderWidth: 2, pointRadius: 0 },
+        { label: 'CPM', data: [], borderWidth: 2, pointRadius: 0 }
+      ]
+    };
+
+    function ensureChart(){
+      if (chart) return chart;
+      const ctx = document.getElementById('chartDR');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: chartData,
+        options: {
+          responsive: true,
+          animation: false,
+          maintainAspectRatio: false,
+          scales: {
+            x: { ticks: { maxRotation:0, autoSkip:true }, grid: { display:false } },
+            y: { beginAtZero: true }
+          },
+          plugins: {
+            legend: { labels: { color: '#cbd5e1' } }
+          }
+        }
+      });
+      return chart;
+    }
+
+    function addPoint(ts, dr_uSv_h, cpm) {
+      const maxPoints = 300; // ~5 menit jika 1s/sample
+      chartData.labels.push(ts);
+      chartData.datasets[0].data.push(dr_uSv_h);
+      chartData.datasets[1].data.push(cpm);
+      if (chartData.labels.length > maxPoints) {
+        chartData.labels.shift();
+        chartData.datasets.forEach(ds => ds.data.shift());
+      }
+      ensureChart().update();
+    }
+
+    // -------- WebSocket handling with auto-reconnect --------
+    let ws = null; let reconnectTimer = null; let backoff = 500; // ms
+    const csvRows = [['timestamp','DR_uSv_h','AVG_uSv_h','D_uSv','CPS','CPM','DT','W']];
+
+    function setStatus(connected){
+      el.dot.classList.remove('ok','bad');
+      el.dot.classList.add(connected ? 'ok' : 'bad');
+      el.statusText.textContent = connected ? 'Connected' : 'Disconnected';
+      el.btnConnect.disabled = connected;
+      el.btnDisconnect.disabled = !connected;
+      el.btnDownload.disabled = csvRows.length <= 1; // enable if we have data
+    }
+
+    function connect(){
+      try { if (ws) ws.close(); } catch {}
+      const url = el.wsUrl.value.trim();
+      if (!/^wss?:\/\//i.test(url)) { alert('Invalid WebSocket URL'); return; }
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        setStatus(true);
+        backoff = 500; // reset backoff
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const obj = JSON.parse(evt.data);
+          // Expect keys: timestamp, DR, D, CPS, CPM, AVG, DT, S, W
+          el.rawBox.textContent = evt.data;
+
+          // Convert + normalize
+          const ts = obj.timestamp || new Date().toISOString();
+          const DR_uSv_h = parseUnitNumber(obj.DR, 'uSv/h');
+          const AVG_uSv_h = parseUnitNumber(obj.AVG, 'uSv/h');
+          const D_uSv = parseUnitNumber(obj.D, 'uSv');
+          const CPS = parseInt(obj.CPS ?? obj.cps ?? 0, 10) || 0;
+          const CPM = parseInt(obj.CPM ?? obj.cpm ?? 0, 10) || 0;
+          const DT = parseInt(obj.DT ?? 0, 10) || 0;
+          const W = (obj.W ?? '').toString();
+
+          const parsed = { timestamp: ts, DR_uSv_h: DR_uSv_h, AVG_uSv_h: AVG_uSv_h, D_uSv: D_uSv, CPS, CPM, DT, W };
+          el.jsonBox.textContent = JSON.stringify(parsed, null, 2);
+
+          // Update stats
+          el.statDR.textContent = (DR_uSv_h ?? '—') + (DR_uSv_h!=null?' μSv/h':'');
+          el.statAVG.textContent = (AVG_uSv_h ?? '—') + (AVG_uSv_h!=null?' μSv/h':'');
+          el.statD.textContent = (D_uSv ?? '—') + (D_uSv!=null?' μSv':'');
+          el.statCPS.textContent = isNaN(CPS)?'—':CPS;
+          el.statCPM.textContent = isNaN(CPM)?'—':CPM;
+          el.statDT.textContent = isNaN(DT)?'—':DT;
+          el.lastTs.textContent = ts;
+
+          // Table row
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${ts}</td><td>${DR_uSv_h ?? ''}</td><td>${AVG_uSv_h ?? ''}</td><td>${D_uSv ?? ''}</td><td>${CPS}</td><td>${CPM}</td><td>${W}</td>`;
+          el.rows.prepend(tr);
+          while (el.rows.children.length > 200) el.rows.removeChild(el.rows.lastChild);
+
+          // Chart
+          addPoint(ts.split('T')[1] || ts, DR_uSv_h ?? 0, CPM);
+
+          // CSV
+          csvRows.push([ts, DR_uSv_h ?? '', AVG_uSv_h ?? '', D_uSv ?? '', CPS, CPM, DT, W]);
+          el.btnDownload.disabled = csvRows.length <= 1;
+        } catch (e) {
+          console.error('Parse error', e);
+        }
+      };
+
+      ws.onclose = () => {
+        setStatus(false);
+        // Auto-reconnect with exponential backoff
+        if (!reconnectTimer) {
+          reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, backoff);
+          backoff = Math.min(backoff * 2, 10000);
+        }
+      };
+
+      ws.onerror = () => { /* onclose will handle state */ };
+    }
+
+    function disconnect(){
+      if (ws) {
+        ws.onclose = null; // prevent auto-reconnect
+        try { ws.close(); } catch {}
+      }
+      setStatus(false);
+    }
+
+    function downloadCSV(){
+      const lines = csvRows.map(r => r.map(v => {
+        const s = (v===null||v===undefined) ? '' : String(v);
+        return s.includes(',') || s.includes('"') ? '"'+s.replace(/"/g,'""')+'"' : s;
+      }).join(','));
+      const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'fs5000_stream.csv'; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    el.btnConnect.addEventListener('click', () => { disconnect(); connect(); });
+    el.btnDisconnect.addEventListener('click', () => { disconnect(); });
+    el.btnDownload.addEventListener('click', () => { downloadCSV(); });
+
+    // Auto-connect on load
+    window.addEventListener('load', () => { connect(); });
+  </script>
+</body>
+</html>

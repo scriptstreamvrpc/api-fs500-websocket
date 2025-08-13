@@ -1,0 +1,81 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FS5000 Realtime Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        button { margin: 5px; padding: 10px 20px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h1>FS5000 Realtime Dashboard new</h1>
+    <div>
+        <button onclick="startStream()">▶ Start Stream</button>
+        <button onclick="stopStream()">⏹ Stop Stream</button>
+    </div>
+    <canvas id="doseChart" width="800" height="300"></canvas>
+    <h3>Live Logs:</h3>
+    <pre id="logBox" style="background: #eee; padding: 10px; height: 200px; overflow-y: scroll;"></pre>
+
+    <script>
+        const ws = new WebSocket("ws://" + location.host + "/ws");
+        const logBox = document.getElementById("logBox");
+
+        const labels = [];
+        const data = {
+            labels: labels,
+            datasets: [{
+                label: 'Dose (μSv)',
+                data: [],
+                borderColor: 'blue',
+                fill: false
+            }]
+        };
+        const config = {
+            type: 'line',
+            data: data,
+            options: {
+                scales: {
+                    x: { display: true, title: { display: true, text: 'Time' } },
+                    y: { display: true, title: { display: true, text: 'Dose (μSv)' } }
+                }
+            }
+        };
+        const doseChart = new Chart(document.getElementById('doseChart'), config);
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            logBox.textContent += `[${msg.topic}] ${msg.message}
+`;
+            logBox.scrollTop = logBox.scrollHeight;
+
+            if (msg.topic === "fs5000/dose") {
+                try {
+                    const doseObj = JSON.parse(msg.message.replace(/'/g, '"'));
+                    const ts = doseObj.timestamp;
+                    const dose = doseObj.dose_uSv;
+                    data.labels.push(ts);
+                    data.datasets[0].data.push(dose);
+                    if (data.labels.length > 20) {
+                        data.labels.shift();
+                        data.datasets[0].data.shift();
+                    }
+                    doseChart.update();
+                } catch (err) {
+                    console.log("Parse error:", err);
+                }
+            }
+        };
+
+        async function startStream() {
+            await fetch("/start-stream", { method: "POST" });
+        }
+
+        async function stopStream() {
+            await fetch("/stop-stream", { method: "POST" });
+        }
+    </script>
+</body>
+</html>
+        
